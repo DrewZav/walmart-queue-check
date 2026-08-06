@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Walmart Queue Check</title>
+    <style>
+      :root {
+        --bg0: #0b1220;
+        --bg1: #121a2b;
+        --card: rgba(255, 255, 255, 0.04);
+        --line: rgba(255, 255, 255, 0.1);
+        --text: #f3f6fb;
+        --muted: #9aa8bf;
+        --accent: #ffc220;
+        --ok: #3ddc97;
+        --warn: #ff8b4a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(1000px 500px at 10% -10%, rgba(255, 194, 32, 0.16), transparent 55%),
+          radial-gradient(800px 400px at 100% 0%, rgba(61, 220, 151, 0.08), transparent 50%),
+          linear-gradient(180deg, var(--bg0), var(--bg1));
+      }
+      main {
+        width: min(720px, calc(100% - 2rem));
+        margin: 0 auto;
+        padding: 2.5rem 0 3rem;
+      }
+      h1 {
+        margin: 0 0 0.35rem;
+        font-size: clamp(1.6rem, 4vw, 2.1rem);
+        letter-spacing: -0.03em;
+      }
+      .sub {
+        margin: 0 0 1.5rem;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 1rem;
+        backdrop-filter: blur(8px);
+      }
+      label {
+        display: block;
+        font-size: 0.85rem;
+        color: var(--muted);
+        margin-bottom: 0.45rem;
+      }
+      textarea {
+        width: 100%;
+        min-height: 110px;
+        resize: vertical;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.28);
+        color: var(--text);
+        padding: 0.85rem 0.95rem;
+        font: inherit;
+        line-height: 1.4;
+      }
+      textarea:focus {
+        outline: 2px solid rgba(255, 194, 32, 0.45);
+        border-color: transparent;
+      }
+      .row {
+        display: flex;
+        gap: 0.6rem;
+        margin-top: 0.75rem;
+        flex-wrap: wrap;
+      }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.7rem 1.15rem;
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .primary {
+        background: var(--accent);
+        color: #111;
+      }
+      .ghost {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--line);
+      }
+      #result {
+        margin-top: 1rem;
+        display: none;
+      }
+      #result.show { display: block; }
+      .eta {
+        font-size: clamp(2rem, 7vw, 3rem);
+        font-weight: 760;
+        letter-spacing: -0.04em;
+        color: var(--ok);
+        margin: 0.2rem 0 0.35rem;
+      }
+      .eta.warn { color: var(--warn); }
+      .meta {
+        display: grid;
+        gap: 0.45rem;
+        margin-top: 0.9rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      .meta strong { color: var(--text); font-weight: 600; }
+      .err {
+        margin-top: 0.9rem;
+        color: #ff8d8d;
+        display: none;
+      }
+      .err.show { display: block; }
+      footer {
+        margin-top: 1.25rem;
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Walmart queue check</h1>
+      <p class="sub">Paste a <code>walmart.com/qp?qpdata=...</code> link. Instant EST wait — nothing leaves your browser.</p>
+
+      <div class="panel">
+        <label for="link">Queue link</label>
+        <textarea id="link" placeholder="https://www.walmart.com/qp?qpdata=..." autofocus></textarea>
+        <div class="row">
+          <button class="primary" id="check" type="button">Check wait time</button>
+          <button class="ghost" id="paste" type="button">Paste &amp; check</button>
+          <button class="ghost" id="clear" type="button">Clear</button>
+        </div>
+        <div class="err" id="err"></div>
+        <div id="result" class="panel" style="margin-top:1rem; background:rgba(0,0,0,.22)">
+          <div id="item" style="font-weight:650"></div>
+          <div class="eta" id="eta"></div>
+          <div class="meta" id="meta"></div>
+        </div>
+      </div>
+
+      <footer>
+        Reads <code>expectedTurnTimeUnixTimestamp</code> from the link. Use a fresh queue URL for an updated ETA.
+      </footer>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      function parseQpUrl(raw) {
+        const text = String(raw || '').trim();
+        if (!text) throw new Error('Paste a Walmart queue link first.');
+        let url;
+        try {
+          url = new URL(text);
+        } catch {
+          if (text.startsWith('{')) return JSON.parse(text);
+          url = new URL(
+            text.includes('qpdata=')
+              ? `https://www.walmart.com/qp?${text.replace(/^\?/, '')}`
+              : text,
+          );
+        }
+        const qpdata = url.searchParams.get('qpdata');
+        if (!qpdata) throw new Error('Need a walmart.com/qp?qpdata=... link.');
+        return JSON.parse(qpdata);
+      }
+
+      function minutesUntil(unixMs, now = Date.now()) {
+        const eta = Number(unixMs);
+        if (!Number.isFinite(eta) || eta <= 0) return null;
+        return Math.max(0, (eta - now) / 60000);
+      }
+
+      function fmtMinutes(mins) {
+        if (mins == null || !Number.isFinite(mins)) return 'n/a';
+        if (mins < 1) return `${Math.round(mins * 60)} sec`;
+        if (mins < 60) return `${mins.toFixed(1)} min`;
+        const h = Math.floor(mins / 60);
+        const m = Math.round(mins % 60);
+        return `${h}h ${m}m`;
+      }
+
+      function check() {
+        const err = $('err');
+        const result = $('result');
+        err.classList.remove('show');
+        result.classList.remove('show');
+        try {
+          const data = parseQpUrl($('link').value);
+          const item = data?.customMetadata?.item || {};
+          const now = Date.now();
+          const etaMin = minutesUntil(data.expectedTurnTimeUnixTimestamp, now);
+          const turnAt = data.expectedTurnTimeUnixTimestamp
+            ? new Date(Number(data.expectedTurnTimeUnixTimestamp)).toLocaleString('en-US', {
+                timeZone: 'America/New_York',
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                second: '2-digit',
+              }) + ' ET'
+            : 'n/a';
+
+          $('item').textContent = item.name || data.itemId || 'Walmart queue';
+          const etaEl = $('eta');
+          etaEl.textContent = etaMin == null ? 'No ETA in link' : fmtMinutes(etaMin);
+          etaEl.classList.toggle('warn', etaMin != null && etaMin > 45);
+
+          $('meta').innerHTML = [
+            item.currentPrice ? `<div>Price: <strong>${item.currentPrice}</strong></div>` : '',
+            `<div>State: <strong>${data.state || (data.queued ? 'queued' : 'unknown')}</strong>${
+              data.customMetadata?.admissionLikelihood
+                ? ` · ${data.customMetadata.admissionLikelihood}`
+                : ''
+            }</div>`,
+            data.ticket != null ? `<div>Ticket: <strong>#${data.ticket}</strong> · queue ${data.queue || '?'}</div>` : '',
+            `<div>Your turn ~ <strong>${turnAt}</strong></div>`,
+            `<div>Exact: <strong>${etaMin == null ? 'n/a' : etaMin.toFixed(1) + ' minutes'}</strong></div>`,
+          ].join('');
+
+          result.classList.add('show');
+        } catch (e) {
+          err.textContent = e.message || String(e);
+          err.classList.add('show');
+        }
+      }
+
+      $('check').addEventListener('click', check);
+      $('clear').addEventListener('click', () => {
+        $('link').value = '';
+        $('result').classList.remove('show');
+        $('err').classList.remove('show');
+        $('link').focus();
+      });
+      $('paste').addEventListener('click', async () => {
+        try {
+          const text = await navigator.clipboard.readText();
+          $('link').value = text;
+          check();
+        } catch {
+          $('err').textContent = 'Clipboard blocked — paste into the box instead (Ctrl+V).';
+          $('err').classList.add('show');
+        }
+      });
+      $('link').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) check();
+      });
+    </script>
+  </body>
+</html>
