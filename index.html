@@ -347,6 +347,45 @@
       }
       .meta strong { color: var(--ink); font-weight: 600; }
 
+      .tickets { display: grid; gap: 0.75rem; margin-top: 0.85rem; }
+      .ticket-card {
+        padding: 0.85rem;
+        border: 1px solid #2a2a2a;
+        border-left: 3px solid var(--red);
+        background: #050505;
+        animation: popIn 0.28s ease both;
+      }
+      .ticket-card .eta { font-size: clamp(1.8rem, 6vw, 2.6rem); }
+
+      .easy {
+        margin-top: 0.85rem;
+        padding: 0.75rem 0.8rem;
+        border: 1px dashed #333;
+        background: #080808;
+      }
+      .easy p {
+        margin: 0 0 0.55rem;
+        color: var(--muted);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.78rem;
+        line-height: 1.4;
+      }
+      .easy a.bm {
+        display: inline-block;
+        padding: 0.55rem 0.75rem;
+        border: 1px solid var(--red);
+        color: #fff;
+        background: #1a0505;
+        font-family: "IBM Plex Sans", sans-serif;
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        text-decoration: none;
+        cursor: grab;
+      }
+      .easy a.bm:hover { background: #2a0a0a; }
+
       .foot {
         color: #666;
         font-family: "IBM Plex Mono", monospace;
@@ -372,27 +411,36 @@
         </div>
         <p class="kicker">Pokemon TCG // Walmart queue</p>
         <h1>Know your<br /><em>wait.</em></h1>
-        <p class="lede">Paste a Walmart `/qp` link. We track each ticket in your browser so when Walmart stretches the ETA, you’ll see it — not get ghosted into thinking wait reset for no reason.</p>
+        <p class="lede">Paste your Walmart queue link (or the live ticket JSON). We decode it and track each ticket so when Walmart stretches the ETA, you’ll see it.</p>
         <p class="disclaimer">
-          Not 100% accurate. This is a <strong>relative</strong> time checker from Walmart’s estimate in the link.
-          If you’re seeing ~29+ minutes, real wait can be <strong>much, much longer</strong> — they often push you back when the timer hits zero instead of letting you through.
+          Not 100% accurate. If you’re seeing ~29+ minutes, real wait can be <strong>much longer</strong> —
+          they often push the timer back instead of letting you through.
         </p>
 
         <div class="panel">
-          <label for="link">Queue link</label>
-          <textarea id="link" placeholder="https://www.walmart.com/qp?qpdata=..." autofocus></textarea>
+          <label for="link">Paste here</label>
+          <textarea
+            id="link"
+            placeholder="Paste your walmart.com/qp?... link&#10;or validateTickets JSON from DevTools"
+            autofocus
+          ></textarea>
           <div class="row">
             <button class="primary" id="check" type="button">Check wait</button>
             <button class="ghost" id="paste" type="button">Paste &amp; check</button>
             <button class="ghost" id="clear" type="button">Clear</button>
           </div>
-          <div class="err" id="err"></div>
-          <div id="result">
-            <div id="item"></div>
-            <div class="eta" id="eta"></div>
-            <div class="note" id="note"></div>
-            <div class="meta" id="meta"></div>
+
+          <div class="easy">
+            <p>
+              <strong style="color:#fff">Easiest (live):</strong> drag this bookmark to your bookmarks bar.
+              On any Walmart tab (while in queue), click it — we pull live waits and open the result.
+            </p>
+            <a class="bm" id="bookmarklet" href="#">BB Queue Check</a>
           </div>
+
+          <div class="err" id="err"></div>
+          <div id="result" hidden></div>
+          <div class="tickets" id="tickets"></div>
         </div>
 
         <p class="foot">Built for <b>BLACK BOX</b> · tickets remembered on this device · Walmart can still change estimates</p>
@@ -404,6 +452,7 @@
       const $ = (id) => document.getElementById(id);
       const STORE_KEY = 'bb-walmart-queue-tickets-v1';
       const VISITOR_KEY = 'bb-queue-visitor-id';
+      const LIVE = 'https://drewzav.github.io/walmart-queue-check/';
 
       function visitorId() {
         let id = localStorage.getItem(VISITOR_KEY);
@@ -417,54 +466,79 @@
       function trackUsage(payload) {
         const cfg = window.BB_ANALYTICS || {};
         if (!cfg.enabled || !cfg.endpoint) return;
-        const body = {
-          visitorId: visitorId(),
-          itemId: payload.itemId || '',
-          itemName: payload.itemName || '',
-          queue: payload.queue || '',
-          ticket: payload.ticket ?? '',
-          state: payload.state || '',
-          waitMin: payload.waitMin,
-          advertisedWaitMin: payload.advertisedWaitMin,
-          ua: navigator.userAgent.slice(0, 160),
-        };
-        // Fire-and-forget; never send full Walmart links / qpdata.
         fetch(`${String(cfg.endpoint).replace(/\/$/, '')}/v1/event`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            visitorId: visitorId(),
+            itemId: payload.itemId || '',
+            itemName: payload.itemName || '',
+            queue: payload.queue || '',
+            ticket: payload.ticket ?? '',
+            state: payload.state || '',
+            waitMin: payload.waitMin,
+            advertisedWaitMin: payload.advertisedWaitMin,
+            ua: navigator.userAgent.slice(0, 160),
+          }),
           keepalive: true,
           mode: 'cors',
         }).catch(() => {});
       }
 
-      function parseQpUrl(raw) {
+      function looksLikeTicket(o) {
+        return (
+          o &&
+          typeof o === 'object' &&
+          (o.expectedTurnTimeUnixTimestamp != null ||
+            o.ticket != null ||
+            o.queue != null ||
+            o.itemId != null)
+        );
+      }
+
+      /** Accept /qp URL, raw qpdata JSON, or validateTickets array/object. */
+      function parseInput(raw) {
         const text = String(raw || '').trim();
-        if (!text) throw new Error('Paste a Walmart queue link first.');
+        if (!text) throw new Error('Paste a Walmart queue link (or ticket JSON) first.');
+
+        if (text.startsWith('[') || text.startsWith('{')) {
+          const data = JSON.parse(text);
+          const list = Array.isArray(data) ? data : [data];
+          if (!list.length || !looksLikeTicket(list[0])) {
+            throw new Error('JSON pasted, but it does not look like Walmart queue tickets.');
+          }
+          return list;
+        }
+
         let url;
         try {
           url = new URL(text);
         } catch {
-          if (text.startsWith('{')) return JSON.parse(text);
           url = new URL(
             text.includes('qpdata=')
               ? `https://www.walmart.com/qp?${text.replace(/^\?/, '')}`
               : text,
           );
         }
+
         const qpdata = url.searchParams.get('qpdata');
-        if (!qpdata) throw new Error('Need a walmart.com/qp?qpdata=... link.');
-        return JSON.parse(qpdata);
+        if (!qpdata) {
+          throw new Error(
+            'Need a walmart.com/qp?qpdata=... link, or paste the validateTickets JSON from DevTools. Product pages alone do not include wait time.',
+          );
+        }
+        return [JSON.parse(qpdata)];
       }
 
       function minutesUntil(unixMs, now = Date.now()) {
         const eta = Number(unixMs);
         if (!Number.isFinite(eta) || eta <= 0) return null;
-        return Math.max(0, (eta - now) / 60000);
+        return (eta - now) / 60000;
       }
 
       function fmtMinutes(mins) {
         if (mins == null || !Number.isFinite(mins)) return 'n/a';
+        if (mins < 0) return `OVERDUE ${fmtMinutes(-mins)}`;
         if (mins < 1) return `${Math.round(mins * 60)} SEC`;
         if (mins < 60) return `${mins.toFixed(1)} MIN`;
         const h = Math.floor(mins / 60);
@@ -536,92 +610,141 @@
         return { key, status, record: prev, extendedMin, improvedMin };
       }
 
-      function check() {
+      function renderTicket(data, now) {
+        const item = data?.customMetadata?.item || {};
+        const currentTurn = Number(data.expectedTurnTimeUnixTimestamp) || 0;
+        const track = trackTicket(data, now);
+        const advertisedMin = minutesUntil(currentTurn, now);
+        const firstMin = minutesUntil(track.record.firstTurn, now);
+        const bestMin = minutesUntil(track.record.bestTurn, now);
+        // Show what Walmart is advertising *now* (matches validateTickets).
+        // Tracked best is secondary so an old URL does not pin the big number at 0.
+        const displayMin = advertisedMin;
+        const stale = advertisedMin != null && advertisedMin <= 0;
+
+        let noteText = '';
+        let noteOk = false;
+        if (stale) {
+          noteText =
+            'This payload’s ETA already passed (shows 0). Refresh Walmart and paste a fresh /qp link — or use the bookmarklet on a Walmart tab for live validateTickets.';
+        } else if (track.status === 'first') {
+          noteText = 'Tracking this ticket on this device. Re-check later to see if Walmart stretches the ETA.';
+          noteOk = true;
+        } else if (track.status === 'extended') {
+          noteText = `Walmart pushed this ticket back ~${track.extendedMin.toFixed(1)} min (same #${data.ticket}). They do this when the timer runs out. Earliest turn we’ve tracked: ${fmtEt(track.record.bestTurn)}.`;
+        } else if (track.status === 'improved') {
+          noteText = `ETA improved ~${track.improvedMin.toFixed(1)} min vs last check.`;
+          noteOk = true;
+        } else if (
+          advertisedMin != null &&
+          bestMin != null &&
+          advertisedMin - Math.max(0, bestMin) >= 1 &&
+          bestMin > 0
+        ) {
+          noteText = `Advertising ${fmtMinutes(advertisedMin)} now, but earliest ETA we tracked for this ticket was ${fmtMinutes(bestMin)} (${fmtEt(track.record.bestTurn)}).`;
+        } else {
+          noteText = 'Countdown only moved with the clock. Hitting 0 does not guarantee entry.';
+          noteOk = true;
+        }
+
+        const card = document.createElement('div');
+        card.className = 'ticket-card';
+        card.innerHTML = `
+          <div class="item-name"></div>
+          <div class="eta"></div>
+          <div class="note"></div>
+          <div class="meta"></div>
+        `;
+        card.querySelector('.item-name').textContent =
+          item.name || data.itemId || 'Walmart queue';
+        const etaEl = card.querySelector('.eta');
+        etaEl.textContent =
+          displayMin == null ? 'NO ETA' : stale ? '0 · STALE' : fmtMinutes(Math.max(0, displayMin));
+        etaEl.classList.toggle('warn', stale || (advertisedMin != null && advertisedMin > 45));
+
+        const noteEl = card.querySelector('.note');
+        noteEl.textContent = noteText;
+        noteEl.classList.add('show');
+        if (noteOk && !stale) noteEl.classList.add('ok');
+
+        card.querySelector('.meta').innerHTML = [
+          item.currentPrice ? `<div>PRICE <strong>${item.currentPrice}</strong></div>` : '',
+          `<div>STATE <strong>${data.state || 'unknown'}</strong>${
+            data.customMetadata?.admissionLikelihood
+              ? ` · ${data.customMetadata.admissionLikelihood}`
+              : ''
+          }</div>`,
+          data.ticket != null
+            ? `<div>TICKET <strong>#${data.ticket}</strong> · ${data.queue || '?'}</div>`
+            : '',
+          `<div>WALMART NOW <strong>${fmtEt(currentTurn)}</strong> · ${fmtMinutes(advertisedMin)}</div>`,
+          `<div>BEST TRACKED <strong>${fmtEt(track.record.bestTurn)}</strong> · ${fmtMinutes(bestMin)}</div>`,
+          `<div>FIRST SEEN <strong>${fmtEt(track.record.firstTurn)}</strong> · ${fmtMinutes(firstMin)}</div>`,
+        ].join('');
+
+        trackUsage({
+          itemId: item.itemID || data.itemId || '',
+          itemName: item.name || '',
+          queue: data.queue || '',
+          ticket: data.ticket,
+          state: data.state || '',
+          waitMin: displayMin != null ? Math.max(0, displayMin) : null,
+          advertisedWaitMin: advertisedMin != null ? Math.max(0, advertisedMin) : null,
+        });
+
+        return card;
+      }
+
+      function check(rawText) {
         const err = $('err');
-        const result = $('result');
-        const note = $('note');
+        const tickets = $('tickets');
         err.classList.remove('show');
-        result.classList.remove('show');
-        note.classList.remove('show', 'ok');
-        note.textContent = '';
+        tickets.innerHTML = '';
         try {
-          const data = parseQpUrl($('link').value);
-          const item = data?.customMetadata?.item || {};
+          const list = parseInput(rawText != null ? rawText : $('link').value);
           const now = Date.now();
-          const currentTurn = Number(data.expectedTurnTimeUnixTimestamp) || 0;
-          const track = trackTicket(data, now);
-          const advertisedMin = minutesUntil(currentTurn, now);
-          const firstMin = minutesUntil(track.record.firstTurn, now);
-          const bestMin = minutesUntil(track.record.bestTurn, now);
-
-          $('item').textContent = item.name || data.itemId || 'Walmart queue';
-          const etaEl = $('eta');
-          // Show earliest ETA we have ever seen for this ticket (honest progress),
-          // and call out Walmart's current advertised wait separately.
-          const displayMin = bestMin != null ? bestMin : advertisedMin;
-          etaEl.textContent = displayMin == null ? 'NO ETA' : fmtMinutes(displayMin);
-          etaEl.classList.toggle('warn', advertisedMin != null && advertisedMin > 45);
-
-          if (track.status === 'first') {
-            note.textContent = 'Tracking this ticket on this device. Re-paste later to detect if Walmart stretches the ETA.';
-            note.classList.add('show', 'ok');
-          } else if (track.status === 'extended') {
-            note.textContent = `Walmart pushed this ticket back ~${track.extendedMin.toFixed(1)} min (same #${data.ticket}). They do this when the timer runs out — you are not let through on the first ETA. Big number = earliest turn we’ve tracked (${fmtEt(track.record.bestTurn)}). Advertised now: ${fmtMinutes(advertisedMin)}.`;
-            note.classList.add('show');
-            etaEl.classList.add('warn');
-          } else if (track.status === 'improved') {
-            note.textContent = `ETA improved ~${track.improvedMin.toFixed(1)} min vs last paste. Nice.`;
-            note.classList.add('show', 'ok');
-          } else if (
-            advertisedMin != null &&
-            bestMin != null &&
-            advertisedMin - bestMin >= 1
-          ) {
-            note.textContent = `Walmart is advertising ${fmtMinutes(advertisedMin)}, but your earliest ETA for this ticket was ${fmtMinutes(bestMin)} (${fmtEt(track.record.bestTurn)}). When that clock hits zero they often shove you back instead of admitting you.`;
-            note.classList.add('show');
-          } else {
-            note.textContent = 'Same ticket ETA as last check (countdown only moved with the clock). Hitting 0 does not guarantee entry — Walmart can push you back.';
-            note.classList.add('show', 'ok');
+          for (const data of list) {
+            tickets.appendChild(renderTicket(data, now));
           }
-
-          $('meta').innerHTML = [
-            item.currentPrice ? `<div>PRICE <strong>${item.currentPrice}</strong></div>` : '',
-            `<div>STATE <strong>${data.state || (data.queued ? 'queued' : 'unknown')}</strong>${
-              data.customMetadata?.admissionLikelihood
-                ? ` · ${data.customMetadata.admissionLikelihood}`
-                : ''
-            }</div>`,
-            data.ticket != null
-              ? `<div>TICKET <strong>#${data.ticket}</strong> · ${data.queue || '?'}</div>`
-              : '',
-            `<div>BEST TURN (tracked) <strong>${fmtEt(track.record.bestTurn)}</strong> · ${fmtMinutes(bestMin)}</div>`,
-            `<div>FIRST SEEN TURN <strong>${fmtEt(track.record.firstTurn)}</strong> · ${fmtMinutes(firstMin)}</div>`,
-            `<div>WALMART NOW <strong>${fmtEt(currentTurn)}</strong> · ${fmtMinutes(advertisedMin)}</div>`,
-          ].join('');
-
-          trackUsage({
-            itemId: item.itemID || data.itemId || '',
-            itemName: item.name || '',
-            queue: data.queue || '',
-            ticket: data.ticket,
-            state: data.state || '',
-            waitMin: displayMin,
-            advertisedWaitMin: advertisedMin,
-          });
-
-          result.classList.add('show');
         } catch (e) {
           err.textContent = e.message || String(e);
           err.classList.add('show');
         }
       }
 
-      $('check').addEventListener('click', check);
+      function installBookmarklet() {
+        const dest = location.origin.includes('github.io')
+          ? location.href.split('#')[0]
+          : LIVE;
+        const code = `javascript:(async()=>{try{const r=await fetch('https://q-api.www.walmart.com/validateTickets',{credentials:'include',headers:{accept:'application/json','content-type':'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();const u=${JSON.stringify(dest)}+'#v='+encodeURIComponent(JSON.stringify(j));open(u,'_blank')}catch(e){alert('BB Queue Check failed. Stay on walmart.com while queued.\\n'+e)}})();`;
+        $('bookmarklet').setAttribute('href', code);
+        $('bookmarklet').addEventListener('click', (e) => {
+          e.preventDefault();
+          alert(
+            'Drag “BB Queue Check” onto your bookmarks bar.\n\nThen open Walmart (while in queue) and click the bookmark for live waits.',
+          );
+        });
+      }
+
+      function loadFromHash() {
+        const h = location.hash || '';
+        if (!h.startsWith('#v=')) return;
+        try {
+          const json = decodeURIComponent(h.slice(3));
+          $('link').value = json;
+          check(json);
+          history.replaceState(null, '', location.pathname + location.search);
+        } catch (e) {
+          $('err').textContent = 'Could not read bookmarklet data: ' + (e.message || e);
+          $('err').classList.add('show');
+        }
+      }
+
+      $('check').addEventListener('click', () => check());
       $('clear').addEventListener('click', () => {
         $('link').value = '';
-        $('result').classList.remove('show');
+        $('tickets').innerHTML = '';
         $('err').classList.remove('show');
-        $('note').classList.remove('show', 'ok');
         $('link').focus();
       });
       $('paste').addEventListener('click', async () => {
@@ -629,13 +752,16 @@
           $('link').value = await navigator.clipboard.readText();
           check();
         } catch {
-          $('err').textContent = 'Clipboard blocked — paste into the box (Ctrl+V).';
+          $('err').textContent = 'Clipboard blocked — paste into the box (Ctrl+V), then Check wait.';
           $('err').classList.add('show');
         }
       });
       $('link').addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) check();
       });
+
+      installBookmarklet();
+      loadFromHash();
     </script>
   </body>
 </html>
