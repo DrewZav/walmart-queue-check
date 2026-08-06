@@ -201,6 +201,20 @@
         line-height: 1.4;
       }
 
+      .disclaimer {
+        margin: 0;
+        max-width: 42ch;
+        padding: 0.7rem 0.8rem;
+        border: 1px solid #3a2a00;
+        border-left: 3px solid var(--warn);
+        background: #120e00;
+        color: #ffd89a;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.8rem;
+        line-height: 1.45;
+      }
+      .disclaimer strong { color: #fff3d0; font-weight: 700; }
+
       .panel {
         border: 1px solid var(--line);
         background: var(--panel);
@@ -359,6 +373,10 @@
         <p class="kicker">Pokemon TCG // Walmart queue</p>
         <h1>Know your<br /><em>wait.</em></h1>
         <p class="lede">Paste a Walmart `/qp` link. We track each ticket in your browser so when Walmart stretches the ETA, you’ll see it — not get ghosted into thinking wait reset for no reason.</p>
+        <p class="disclaimer">
+          Not 100% accurate. This is a <strong>relative</strong> time checker from Walmart’s estimate in the link.
+          If you’re seeing ~29+ minutes, real wait can be <strong>much, much longer</strong> — they often push you back when the timer hits zero instead of letting you through.
+        </p>
 
         <div class="panel">
           <label for="link">Queue link</label>
