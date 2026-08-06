@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>BLACK BOX · Queue analytics (private)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #000;
+        --ink: #fff;
+        --muted: #8a8a8a;
+        --red: #ff1a1a;
+        --line: #222;
+        --ok: #39ff88;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+      }
+      main {
+        width: min(920px, calc(100% - 2rem));
+        margin: 0 auto;
+        padding: 2rem 0 3rem;
+      }
+      h1 {
+        margin: 0 0 0.35rem;
+        font-family: "Archivo Black", sans-serif;
+        letter-spacing: -0.02em;
+      }
+      .sub { color: var(--muted); margin: 0 0 1.25rem; font-family: "IBM Plex Mono", monospace; font-size: 0.85rem; }
+      .panel {
+        border: 1px solid var(--line);
+        background: #0a0a0a;
+        padding: 1rem;
+        margin-bottom: 1rem;
+      }
+      label {
+        display: block;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 0.4rem;
+      }
+      input {
+        width: 100%;
+        border: 1px solid #2a2a2a;
+        background: #000;
+        color: var(--ink);
+        padding: 0.7rem 0.8rem;
+        font-family: "IBM Plex Mono", monospace;
+      }
+      .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.7rem; }
+      button {
+        border: 0;
+        padding: 0.7rem 1rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+      .primary { background: var(--red); color: #fff; }
+      .ghost { background: transparent; color: #fff; border: 1px solid #333; }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 0.75rem;
+      }
+      .card {
+        border: 1px solid var(--line);
+        padding: 0.9rem;
+        background: #050505;
+      }
+      .card .n {
+        font-family: "Archivo Black", sans-serif;
+        font-size: 2rem;
+        color: var(--ok);
+        line-height: 1;
+      }
+      .card .l {
+        margin-top: 0.35rem;
+        color: var(--muted);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.78rem;
+      }
+      th, td {
+        text-align: left;
+        padding: 0.45rem 0.35rem;
+        border-bottom: 1px solid #1a1a1a;
+        vertical-align: top;
+      }
+      th { color: var(--muted); font-weight: 600; }
+      .err { color: #ff6b6b; font-family: "IBM Plex Mono", monospace; margin-top: 0.6rem; }
+      .ok { color: var(--ok); font-family: "IBM Plex Mono", monospace; margin-top: 0.6rem; }
+      #app { display: none; }
+      #app.show { display: block; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>QUEUE ANALYTICS</h1>
+      <p class="sub">Private · not linked from the public checker · requires admin key</p>
+
+      <div class="panel" id="gate">
+        <label for="endpoint">Worker endpoint</label>
+        <input id="endpoint" placeholder="https://bb-queue-analytics.xxx.workers.dev" />
+        <label for="key" style="margin-top:0.75rem">Admin key</label>
+        <input id="key" type="password" placeholder="ADMIN_KEY secret" />
+        <div class="row">
+          <button class="primary" id="unlock" type="button">Unlock</button>
+        </div>
+        <div class="err" id="gateErr"></div>
+      </div>
+
+      <div id="app">
+        <div class="cards" id="cards"></div>
+        <div class="panel" style="margin-top:1rem">
+          <div class="row" style="margin-top:0;margin-bottom:0.75rem">
+            <button class="ghost" id="refresh" type="button">Refresh</button>
+            <button class="ghost" id="lock" type="button">Lock</button>
+          </div>
+          <h3 style="margin:0 0 0.6rem;font-family:Archivo Black,sans-serif">Top items</h3>
+          <div id="items"></div>
+          <h3 style="margin:1rem 0 0.6rem;font-family:Archivo Black,sans-serif">Recent checks</h3>
+          <div id="recent"></div>
+          <div class="ok" id="status"></div>
+          <div class="err" id="appErr"></div>
+        </div>
+      </div>
+    </main>
+    <script src="analytics-config.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const cfg = window.BB_ANALYTICS || {};
+
+      function saved() {
+        return {
+          endpoint: sessionStorage.getItem('bb-admin-endpoint') || cfg.endpoint || '',
+          key: sessionStorage.getItem('bb-admin-key') || '',
+        };
+      }
+
+      async function loadStats() {
+        const { endpoint, key } = saved();
+        $('appErr').textContent = '';
+        const url = `${endpoint.replace(/\/$/, '')}/v1/stats?key=${encodeURIComponent(key)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        const s = data.stats || {};
+        $('cards').innerHTML = [
+          ['Unique users', s.uniqueVisitors ?? 0],
+          ['Links checked', s.checks ?? 0],
+          ['First seen', s.firstSeenAt ? new Date(s.firstSeenAt).toLocaleString() : '—'],
+          ['Last seen', s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleString() : '—'],
+        ]
+          .map(
+            ([l, n]) =>
+              `<div class="card"><div class="n">${n}</div><div class="l">${l}</div></div>`,
+          )
+          .join('');
+
+        const items = data.topItems || [];
+        $('items').innerHTML = items.length
+          ? `<table><thead><tr><th>Checks</th><th>Item</th><th>ID</th></tr></thead><tbody>${items
+              .map(
+                (i) =>
+                  `<tr><td>${i.checks || 0}</td><td>${escapeHtml(i.name || '—')}</td><td>${escapeHtml(i.itemId || '')}</td></tr>`,
+              )
+              .join('')}</tbody></table>`
+          : '<div class="sub">No item data yet.</div>';
+
+        const recent = data.recent || [];
+        $('recent').innerHTML = recent.length
+          ? `<table><thead><tr><th>When</th><th>User</th><th>Wait</th><th>Item</th><th>Ticket</th></tr></thead><tbody>${recent
+              .map(
+                (r) =>
+                  `<tr><td>${escapeHtml(r.at || '')}</td><td>${escapeHtml(r.visitorId || '')}</td><td>${r.waitMin ?? '—'}</td><td>${escapeHtml(r.itemName || r.itemId || '')}</td><td>${escapeHtml(r.ticket || '')}</td></tr>`,
+              )
+              .join('')}</tbody></table>`
+          : '<div class="sub">No events yet.</div>';
+
+        $('status').textContent = `Updated ${new Date(data.generatedAt || Date.now()).toLocaleString()}`;
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;');
+      }
+
+      function showApp() {
+        $('gate').style.display = 'none';
+        $('app').classList.add('show');
+      }
+
+      $('endpoint').value = saved().endpoint;
+      if (saved().endpoint && saved().key) {
+        loadStats().then(showApp).catch((e) => {
+          $('gateErr').textContent = e.message || String(e);
+        });
+      }
+
+      $('unlock').onclick = async () => {
+        $('gateErr').textContent = '';
+        const endpoint = $('endpoint').value.trim().replace(/\/$/, '');
+        const key = $('key').value.trim();
+        if (!endpoint || !key) {
+          $('gateErr').textContent = 'Endpoint and admin key required.';
+          return;
+        }
+        sessionStorage.setItem('bb-admin-endpoint', endpoint);
+        sessionStorage.setItem('bb-admin-key', key);
+        try {
+          await loadStats();
+          showApp();
+        } catch (e) {
+          $('gateErr').textContent = e.message || String(e);
+        }
+      };
+      $('refresh').onclick = () => loadStats().catch((e) => {
+        $('appErr').textContent = e.message || String(e);
+      });
+      $('lock').onclick = () => {
+        sessionStorage.removeItem('bb-admin-key');
+        location.reload();
+      };
+    </script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+name = "bb-queue-analytics"
+main = "src/index.js"
+compatibility_date = "2026-08-05"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "ANALYTICS_KV"
+id = "REPLACE_AFTER_KV_CREATE"
+preview_id = "REPLACE_AFTER_KV_CREATE"
+
+# Set with: npx wrangler secret put ADMIN_KEY
+# Do not commit real secrets.

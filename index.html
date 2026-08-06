@@ -399,9 +399,44 @@
       </main>
     </div>
 
+    <script src="analytics-config.js"></script>
     <script>
       const $ = (id) => document.getElementById(id);
       const STORE_KEY = 'bb-walmart-queue-tickets-v1';
+      const VISITOR_KEY = 'bb-queue-visitor-id';
+
+      function visitorId() {
+        let id = localStorage.getItem(VISITOR_KEY);
+        if (!id) {
+          id = crypto.randomUUID();
+          localStorage.setItem(VISITOR_KEY, id);
+        }
+        return id;
+      }
+
+      function trackUsage(payload) {
+        const cfg = window.BB_ANALYTICS || {};
+        if (!cfg.enabled || !cfg.endpoint) return;
+        const body = {
+          visitorId: visitorId(),
+          itemId: payload.itemId || '',
+          itemName: payload.itemName || '',
+          queue: payload.queue || '',
+          ticket: payload.ticket ?? '',
+          state: payload.state || '',
+          waitMin: payload.waitMin,
+          advertisedWaitMin: payload.advertisedWaitMin,
+          ua: navigator.userAgent.slice(0, 160),
+        };
+        // Fire-and-forget; never send full Walmart links / qpdata.
+        fetch(`${String(cfg.endpoint).replace(/\/$/, '')}/v1/event`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+          keepalive: true,
+          mode: 'cors',
+        }).catch(() => {});
+      }
 
       function parseQpUrl(raw) {
         const text = String(raw || '').trim();
@@ -563,6 +598,16 @@
             `<div>FIRST SEEN TURN <strong>${fmtEt(track.record.firstTurn)}</strong> · ${fmtMinutes(firstMin)}</div>`,
             `<div>WALMART NOW <strong>${fmtEt(currentTurn)}</strong> · ${fmtMinutes(advertisedMin)}</div>`,
           ].join('');
+
+          trackUsage({
+            itemId: item.itemID || data.itemId || '',
+            itemName: item.name || '',
+            queue: data.queue || '',
+            ticket: data.ticket,
+            state: data.state || '',
+            waitMin: displayMin,
+            advertisedWaitMin: advertisedMin,
+          });
 
           result.classList.add('show');
         } catch (e) {
